@@ -3,6 +3,7 @@ package dev.rowbo.ndef
 import android.nfc.Tag
 import android.nfc.tech.MifareUltralight
 import android.util.Log
+import java.io.IOException
 
 data class NdefScanResult(
     val rawData: String,
@@ -174,6 +175,89 @@ class NfcManager {
             hexChars[i * 3 + 2] = ' '
         }
         return String(hexChars)
+    }
+
+    fun createNdefTextRecord(text: String): ByteArray {
+        // Create capability container (CC) - first 4 pages
+        val cc = byteArrayOf(
+            0x04, 0x35, 0x79, 0xC0.toByte(),  // Page 0
+            0x52, 0x4A, 0x74, 0x80.toByte(),  // Page 1
+            0xEC.toByte(), 0x48, 0x00, 0x00,  // Page 2
+            0xE1.toByte(), 0x11, 0x12, 0x00   // Page 3
+        )
+
+        // Create NDEF Message
+        val languageCode = "en"
+        val languageCodeLength = languageCode.length
+        val textBytes = text.toByteArray()
+        val payloadLength = 1 + languageCodeLength + textBytes.size // status byte + language code + text
+
+        val ndefMessage = byteArrayOf(
+            0xD1.toByte(),  // TNF=1 (Well Known) + MB=1 + ME=1 + SR=1
+            0x01,           // Type Length = 1 (Text record type "T")
+            payloadLength.toByte(),  // Payload Length
+            0x54,           // Type: "T"
+            (languageCodeLength and 0x3F).toByte(),  // Status byte (no UTF-16, language code length)
+            *languageCode.toByteArray(),  // Language code
+            *textBytes      // The actual text
+        )
+
+        // Create TLV structure
+        val tlv = byteArrayOf(
+            0x03,  // NDEF Message TLV tag
+            ndefMessage.size.toByte(),  // Length
+            *ndefMessage,  // Value (NDEF Message)
+            0xFE.toByte(),  // Terminator TLV
+            0x00, 0x00  // Padding to complete the page
+        )
+
+        // Combine everything
+        return cc + tlv
+    }
+
+    fun writeTag(tag: Tag, text: String) {
+        val ultralight = MifareUltralight.get(tag) ?: throw Exception("Tag is not a Mifare Ultralight tag")
+        
+        try {
+            ultralight.connect()
+            if (!ultralight.isConnected) {
+                throw Exception("Failed to connect to tag")
+            }
+
+            // Read capability container to check if tag is writable
+            val cc = ultralight.readPages(3)  // Read page 3 which contains write access
+            if ((cc[3].toInt() and 0xFF) != 0x00) {
+                throw Exception("Tag appears to be write protected")
+            }
+
+            // Create NDEF message data
+            val data = createNdefTextRecord(text)
+            
+            // Write the data page by page, starting from page 4
+            // Pages 0-3 are reserved for capability container
+            for (i in 16 until data.size step 4) {  // Start at byte 16 (page 4)
+                val page = data.slice(i until minOf(i + 4, data.size)).toByteArray()
+                // Pad the last page with zeros if needed
+                val paddedPage = if (page.size < 4) {
+                    page + ByteArray(4 - page.size)
+                } else {
+                    page
+                }
+                val pageNumber = i / 4
+                try {
+                    ultralight.writePage(pageNumber, paddedPage)
+                    Log.d("NFC", "Wrote page $pageNumber: ${bytesToHex(paddedPage)}")
+                } catch (e: IOException) {
+                    throw Exception("Failed to write page $pageNumber. Tag may be protected or damaged.")
+                }
+            }
+            
+            ultralight.close()
+        } catch (e: Exception) {
+            ultralight.close()
+            Log.e("NFC", "Error writing to tag", e)
+            throw e
+        }
     }
 
     companion object {

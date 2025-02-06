@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
     private var scanResult by mutableStateOf<String?>(null)
     private var textToWrite by mutableStateOf("")
     private var isWriteMode by mutableStateOf(false)
+    private var isWriting by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -119,13 +120,15 @@ class MainActivity : ComponentActivity() {
                                         value = textToWrite,
                                         onValueChange = { textToWrite = it },
                                         label = { Text("Text to write") },
-                                        modifier = Modifier.fillMaxWidth()
+                                        modifier = Modifier.fillMaxWidth(),
+                                        enabled = !isWriting
                                     )
                                     Button(
-                                        onClick = { /* We'll implement this later */ },
-                                        modifier = Modifier.fillMaxWidth()
+                                        onClick = { isWriting = true },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        enabled = textToWrite.isNotEmpty() && !isWriting
                                     ) {
-                                        Text("Tap NFC tag to write")
+                                        Text(if (isWriting) "Waiting for tag..." else "Tap NFC tag to write")
                                     }
                                 }
                             }
@@ -221,10 +224,21 @@ class MainActivity : ComponentActivity() {
             NfcAdapter.ACTION_NDEF_DISCOVERED -> {
                 intent.getParcelableExtra<Tag>(NfcAdapter.EXTRA_TAG)?.let { tag ->
                     try {
-                        scanResult = nfcManager.readTag(tag)
+                        if (isWriteMode && isWriting) {
+                            // Write mode
+                            nfcManager.writeTag(tag, textToWrite)
+                            Toast.makeText(this, "Successfully wrote to tag", Toast.LENGTH_LONG).show()
+                            isWriting = false
+                            textToWrite = ""
+                        } else {
+                            // Read mode
+                            scanResult = nfcManager.readTag(tag)
+                        }
                     } catch (e: Exception) {
-                        Toast.makeText(this, "Error reading tag: ${e.message}", Toast.LENGTH_LONG).show()
-                        Log.e("NFC", "Error reading tag", e)
+                        val errorMessage = if (isWriteMode) "Error writing to tag" else "Error reading tag"
+                        Toast.makeText(this, "$errorMessage: ${e.message}", Toast.LENGTH_LONG).show()
+                        Log.e("NFC", errorMessage, e)
+                        isWriting = false
                     }
                 }
             }
