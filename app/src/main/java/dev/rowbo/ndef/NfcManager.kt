@@ -5,13 +5,6 @@ import android.nfc.tech.MifareUltralight
 import android.util.Log
 import java.io.IOException
 
-data class NdefScanResult(
-    val rawData: String,
-    val recordType: String,
-    val content: String,
-    val language: String? = null
-)
-
 class NfcManager {
     fun readTag(tag: Tag): String {
         Log.d("NFC", "Available technologies: ${tag.techList.joinToString()}")
