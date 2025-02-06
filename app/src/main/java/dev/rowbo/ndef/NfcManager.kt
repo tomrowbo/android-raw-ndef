@@ -4,16 +4,23 @@ import android.nfc.Tag
 import android.nfc.tech.MifareUltralight
 import android.util.Log
 
+data class NdefScanResult(
+    val rawData: String,
+    val recordType: String,
+    val content: String,
+    val language: String? = null
+)
+
 class NfcManager {
     fun readTag(tag: Tag): String {
         Log.d("NFC", "Available technologies: ${tag.techList.joinToString()}")
         
-        val ultralight = MifareUltralight.get(tag) ?: return "Not a supported tag"
+        val ultralight = MifareUltralight.get(tag) ?: throw Exception("Tag is not a Mifare Ultralight tag")
         
         return try {
             ultralight.connect()
             if (!ultralight.isConnected) {
-                return "Failed to connect to tag"
+                throw Exception("Failed to connect to tag")
             }
             
             // Read all pages
@@ -29,30 +36,29 @@ class NfcManager {
             }
             ultralight.close()
 
-            val rawDataLog = StringBuilder()
-            rawDataLog.append("Raw data:\n")
-            
-            // Show all pages with their interpretations
+            // Log raw page data
+            Log.d("NFC", "Raw data:")
             for (i in allData.indices step 4) {
                 if (i + 4 > allData.size) break
                 val page = allData.subList(i, i + 4).toByteArray()
                 val pageNum = i/4
-                rawDataLog.append("Page $pageNum: ${bytesToHex(page)}\n")
+                Log.d("NFC", "Page $pageNum: ${bytesToHex(page)}")
             }
             
             // Parse NDEF Message starting at page 4
             val ndefData = allData.subList(16, allData.size).toByteArray()
-            rawDataLog.append("\nNDEF Structure:\n")
+            Log.d("NFC", "\nNDEF Structure:")
             
             // Skip capability container
             var index = 0
+            var content = ""
             while (index < ndefData.size) {
                 val byte = ndefData[index].toInt() and 0xFF
                 
                 when (byte) {
                     0x03 -> { // NDEF Message TLV
                         val length = ndefData[index + 1].toInt() and 0xFF
-                        rawDataLog.append("NDEF Message TLV found (length: $length)\n")
+                        Log.d("NFC", "NDEF Message TLV found (length: $length)")
                         
                         // Move to the actual NDEF message content
                         index += 2  // Skip TLV header
@@ -69,8 +75,8 @@ class NfcManager {
                             val il = (header and 0x08) != 0 // ID Length present
                             val tnf = header and 0x07 // Type Name Format
                             
-                            rawDataLog.append("  Record Header: 0x${header.toString(16)}\n")
-                            rawDataLog.append("    MB: $mb, ME: $me, CF: $cf, SR: $sr, IL: $il, TNF: $tnf\n")
+                            Log.d("NFC", "Record Header: 0x${header.toString(16)}")
+                            Log.d("NFC", "MB: $mb, ME: $me, CF: $cf, SR: $sr, IL: $il, TNF: $tnf")
                             
                             recordIndex++
                             val typeLength = ndefMessage[recordIndex++].toInt() and 0xFF
@@ -88,60 +94,45 @@ class NfcManager {
                             
                             val idLength = if (il) ndefMessage[recordIndex++].toInt() and 0xFF else 0
                             
-                            rawDataLog.append("    Type Length: $typeLength\n")
-                            rawDataLog.append("    Payload Length: $payloadLength\n")
-                            if (il) rawDataLog.append("    ID Length: $idLength\n")
+                            Log.d("NFC", "Type Length: $typeLength")
+                            Log.d("NFC", "Payload Length: $payloadLength")
+                            if (il) Log.d("NFC", "ID Length: $idLength")
                             
                             if (typeLength > 0) {
                                 val type = ndefMessage.copyOfRange(recordIndex, recordIndex + typeLength)
-                                rawDataLog.append("    Type: ${String(type)} (${bytesToHex(type)})\n")
+                                Log.d("NFC", "Type: ${String(type)} (${bytesToHex(type)})")
                                 recordIndex += typeLength
                             }
                             
                             if (idLength > 0) {
                                 val id = ndefMessage.copyOfRange(recordIndex, recordIndex + idLength)
-                                rawDataLog.append("    ID: ${bytesToHex(id)}\n")
+                                Log.d("NFC", "ID: ${bytesToHex(id)}")
                                 recordIndex += idLength
                             }
                             
                             if (payloadLength > 0) {
                                 val payload = ndefMessage.copyOfRange(recordIndex, recordIndex + payloadLength)
-                                rawDataLog.append("    Payload: ${bytesToHex(payload)}\n")
                                 
-                                // Parse Text Record (TNF=1, Type="T")
                                 if (tnf == 1 && typeLength == 1 && String(ndefMessage.copyOfRange(recordIndex - typeLength, recordIndex)) == "T") {
                                     val statusByte = payload[0].toInt()
                                     val languageCodeLength = statusByte and 0x3F
-                                    val languageCode = String(payload, 1, languageCodeLength)
-                                    val text = String(payload, 1 + languageCodeLength, payload.size - 1 - languageCodeLength)
-                                    
-                                    rawDataLog.append("    Text Record:\n")
-                                    rawDataLog.append("      Status: ${if ((statusByte and 0x80) == 0) "UTF-8" else "UTF-16"}\n")
-                                    rawDataLog.append("      Language: $languageCode\n")
-                                    rawDataLog.append("      Content: $text\n")
-                                } else {
-                                    try {
-                                        rawDataLog.append("    ASCII: ${String(payload)}\n")
-                                    } catch (e: Exception) {
-                                        rawDataLog.append("    (Not valid ASCII)\n")
-                                    }
+                                    content = String(payload, 1 + languageCodeLength, payload.size - 1 - languageCodeLength)
                                 }
                                 recordIndex += payloadLength
                             }
                             
-                            if (me) break // End of NDEF message
+                            if (me) break
                         }
                         break
                     }
-                    0xFE -> { // Terminator TLV
-                        rawDataLog.append("Terminator TLV found\n")
+                    0xFE -> {
+                        Log.d("NFC", "Terminator TLV found")
                         break
                     }
                     else -> {
-                        // Skip other TLV types
                         if (index + 1 < ndefData.size) {
                             val length = ndefData[index + 1].toInt() and 0xFF
-                            rawDataLog.append("Skipping TLV type 0x${byte.toString(16)} (length: $length)\n")
+                            Log.d("NFC", "Skipping TLV type 0x${byte.toString(16)} (length: $length)")
                             index += 2 + length
                         } else {
                             index++
@@ -150,12 +141,11 @@ class NfcManager {
                 }
             }
             
-            Log.d("NFC_RAW", rawDataLog.toString())
-            rawDataLog.toString()
+            content.ifEmpty { "No readable content found" }
             
         } catch (e: Exception) {
             Log.e("NFC", "Error reading tag", e)
-            "Error reading tag: ${e.message}"
+            throw e
         }
     }
     
