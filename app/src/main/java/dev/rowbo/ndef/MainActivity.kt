@@ -13,10 +13,16 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -27,12 +33,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.rowbo.ndef.ui.theme.NdefReaderTheme
+import androidx.compose.foundation.layout.Arrangement
 
 class MainActivity : ComponentActivity() {
     private var nfcAdapter: NfcAdapter? = null
     private lateinit var pendingIntent: PendingIntent
     private val nfcManager = NfcManager()
     private var ndefText by mutableStateOf<String>("Tap an NFC tag to read it")
+    private var textToWrite by mutableStateOf("")
+    private var isWriteMode by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -54,18 +63,50 @@ class MainActivity : ComponentActivity() {
         setContent {
             NdefReaderTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Box(
+                    Column(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(innerPadding)
                             .padding(16.dp),
-                        contentAlignment = Alignment.Center
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Text(
-                            text = ndefText,
-                            style = MaterialTheme.typography.bodyLarge,
-                            textAlign = TextAlign.Center
-                        )
+                        // Mode Switch
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Read")
+                            Switch(
+                                checked = isWriteMode,
+                                onCheckedChange = { isWriteMode = it }
+                            )
+                            Text("Write")
+                        }
+
+                        if (isWriteMode) {
+                            // Write Mode UI
+                            OutlinedTextField(
+                                value = textToWrite,
+                                onValueChange = { textToWrite = it },
+                                label = { Text("Text to write") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Button(
+                                onClick = { /* We'll implement this later */ },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Tap NFC tag to write")
+                            }
+                        } else {
+                            // Read Mode UI
+                            Text(
+                                text = ndefText,
+                                style = MaterialTheme.typography.bodyLarge,
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
                 }
             }
