@@ -45,108 +45,119 @@ class NfcManager {
                 Log.d("NFC", "Page $pageNum: ${bytesToHex(page)}")
             }
             
-            // Parse NDEF Message starting at page 4
-            val ndefData = allData.subList(16, allData.size).toByteArray()
-            Log.d("NFC", "\nNDEF Structure:")
-            
-            // Skip capability container
-            var index = 0
-            var content = ""
-            while (index < ndefData.size) {
-                val byte = ndefData[index].toInt() and 0xFF
-                
-                when (byte) {
-                    0x03 -> { // NDEF Message TLV
-                        val length = ndefData[index + 1].toInt() and 0xFF
-                        Log.d("NFC", "NDEF Message TLV found (length: $length)")
-                        
-                        // Move to the actual NDEF message content
-                        index += 2  // Skip TLV header
-                        val ndefMessage = ndefData.copyOfRange(index, index + length)
-                        
-                        // Parse NDEF record
-                        var recordIndex = 0
-                        while (recordIndex < ndefMessage.size) {
-                            val header = ndefMessage[recordIndex].toInt() and 0xFF
-                            val mb = (header and 0x80) != 0 // Message Begin
-                            val me = (header and 0x40) != 0 // Message End
-                            val cf = (header and 0x20) != 0 // Chunk Flag
-                            val sr = (header and 0x10) != 0 // Short Record
-                            val il = (header and 0x08) != 0 // ID Length present
-                            val tnf = header and 0x07 // Type Name Format
-                            
-                            Log.d("NFC", "Record Header: 0x${header.toString(16)}")
-                            Log.d("NFC", "MB: $mb, ME: $me, CF: $cf, SR: $sr, IL: $il, TNF: $tnf")
-                            
-                            recordIndex++
-                            val typeLength = ndefMessage[recordIndex++].toInt() and 0xFF
-                            val payloadLength = if (sr) {
-                                ndefMessage[recordIndex++].toInt() and 0xFF
-                            } else {
-                                val pl = ByteArray(4)
-                                System.arraycopy(ndefMessage, recordIndex, pl, 0, 4)
-                                recordIndex += 4
-                                (pl[0].toInt() and 0xFF shl 24) or
-                                (pl[1].toInt() and 0xFF shl 16) or
-                                (pl[2].toInt() and 0xFF shl 8) or
-                                (pl[3].toInt() and 0xFF)
-                            }
-                            
-                            val idLength = if (il) ndefMessage[recordIndex++].toInt() and 0xFF else 0
-                            
-                            Log.d("NFC", "Type Length: $typeLength")
-                            Log.d("NFC", "Payload Length: $payloadLength")
-                            if (il) Log.d("NFC", "ID Length: $idLength")
-                            
-                            if (typeLength > 0) {
-                                val type = ndefMessage.copyOfRange(recordIndex, recordIndex + typeLength)
-                                Log.d("NFC", "Type: ${String(type)} (${bytesToHex(type)})")
-                                recordIndex += typeLength
-                            }
-                            
-                            if (idLength > 0) {
-                                val id = ndefMessage.copyOfRange(recordIndex, recordIndex + idLength)
-                                Log.d("NFC", "ID: ${bytesToHex(id)}")
-                                recordIndex += idLength
-                            }
-                            
-                            if (payloadLength > 0) {
-                                val payload = ndefMessage.copyOfRange(recordIndex, recordIndex + payloadLength)
-                                
-                                if (tnf == 1 && typeLength == 1 && String(ndefMessage.copyOfRange(recordIndex - typeLength, recordIndex)) == "T") {
-                                    val statusByte = payload[0].toInt()
-                                    val languageCodeLength = statusByte and 0x3F
-                                    content = String(payload, 1 + languageCodeLength, payload.size - 1 - languageCodeLength)
-                                }
-                                recordIndex += payloadLength
-                            }
-                            
-                            if (me) break
-                        }
-                        break
-                    }
-                    0xFE -> {
-                        Log.d("NFC", "Terminator TLV found")
-                        break
-                    }
-                    else -> {
-                        if (index + 1 < ndefData.size) {
-                            val length = ndefData[index + 1].toInt() and 0xFF
-                            Log.d("NFC", "Skipping TLV type 0x${byte.toString(16)} (length: $length)")
-                            index += 2 + length
-                        } else {
-                            index++
-                        }
-                    }
-                }
-            }
-            
-            content.ifEmpty { "No readable content found" }
+            parseNdefData(allData.toByteArray())
             
         } catch (e: Exception) {
             Log.e("NFC", "Error reading tag", e)
             throw e
         }
+    }
+
+    fun parseNdefData(rawData: ByteArray): String {
+        // Skip capability container and get NDEF data starting at page 4
+        val ndefData = if (rawData.size > 16) {
+            rawData.copyOfRange(16, rawData.size)
+        } else {
+            rawData
+        }
+        
+        Log.d("NFC", "\nNDEF Structure:")
+        
+        var index = 0
+        var content = ""
+        
+        while (index < ndefData.size) {
+            val byte = ndefData[index].toInt() and 0xFF
+            
+            when (byte) {
+                0x03 -> { // NDEF Message TLV
+                    val length = ndefData[index + 1].toInt() and 0xFF
+                    Log.d("NFC", "NDEF Message TLV found (length: $length)")
+                    
+                    // Move to the actual NDEF message content
+                    index += 2  // Skip TLV header
+                    val ndefMessage = ndefData.copyOfRange(index, index + length)
+                    
+                    // Parse NDEF record
+                    var recordIndex = 0
+                    while (recordIndex < ndefMessage.size) {
+                        val header = ndefMessage[recordIndex].toInt() and 0xFF
+                        val mb = (header and 0x80) != 0 // Message Begin
+                        val me = (header and 0x40) != 0 // Message End
+                        val cf = (header and 0x20) != 0 // Chunk Flag
+                        val sr = (header and 0x10) != 0 // Short Record
+                        val il = (header and 0x08) != 0 // ID Length present
+                        val tnf = header and 0x07 // Type Name Format
+                        
+                        Log.d("NFC", "Record Header: 0x${header.toString(16)}")
+                        Log.d("NFC", "MB: $mb, ME: $me, CF: $cf, SR: $sr, IL: $il, TNF: $tnf")
+                        
+                        recordIndex++
+                        val typeLength = ndefMessage[recordIndex++].toInt() and 0xFF
+                        val payloadLength = if (sr) {
+                            ndefMessage[recordIndex++].toInt() and 0xFF
+                        } else {
+                            val pl = ByteArray(4)
+                            System.arraycopy(ndefMessage, recordIndex, pl, 0, 4)
+                            recordIndex += 4
+                            (pl[0].toInt() and 0xFF shl 24) or
+                            (pl[1].toInt() and 0xFF shl 16) or
+                            (pl[2].toInt() and 0xFF shl 8) or
+                            (pl[3].toInt() and 0xFF)
+                        }
+                        
+                        val idLength = if (il) ndefMessage[recordIndex++].toInt() and 0xFF else 0
+                        
+                        Log.d("NFC", "Type Length: $typeLength")
+                        Log.d("NFC", "Payload Length: $payloadLength")
+                        if (il) Log.d("NFC", "ID Length: $idLength")
+                        
+                        if (typeLength > 0) {
+                            val type = ndefMessage.copyOfRange(recordIndex, recordIndex + typeLength)
+                            Log.d("NFC", "Type: ${String(type)} (${bytesToHex(type)})")
+                            recordIndex += typeLength
+                        }
+                        
+                        if (idLength > 0) {
+                            val id = ndefMessage.copyOfRange(recordIndex, recordIndex + idLength)
+                            Log.d("NFC", "ID: ${bytesToHex(id)}")
+                            recordIndex += idLength
+                        }
+                        
+                        if (payloadLength > 0) {
+                            val payload = ndefMessage.copyOfRange(recordIndex, recordIndex + payloadLength)
+                            
+                            if (tnf == 1 && typeLength == 1 && String(ndefMessage.copyOfRange(recordIndex - typeLength, recordIndex)) == "T") {
+                                val statusByte = payload[0].toInt()
+                                val languageCodeLength = statusByte and 0x3F
+                                content = String(payload, 1 + languageCodeLength, payload.size - 1 - languageCodeLength)
+                            }
+                            recordIndex += payloadLength
+                        }
+                        
+                        if (me) break
+                    }
+                    break
+                }
+                0xFE -> {
+                    Log.d("NFC", "Terminator TLV found")
+                    break
+                }
+                else -> {
+                    if (index + 1 < ndefData.size) {
+                        val length = ndefData[index + 1].toInt() and 0xFF
+                        Log.d("NFC", "Skipping TLV type 0x${byte.toString(16)} (length: $length)")
+                        index += 2 + length
+                    } else {
+                        index++
+                    }
+                }
+            }
+        }
+        if (content.isEmpty()){
+            throw Exception("No NDEF message found")
+        }
+        return content
     }
     
     private fun Byte.toBinaryString(): String {
